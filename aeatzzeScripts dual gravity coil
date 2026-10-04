@@ -1,0 +1,313 @@
+-- Script em ServerScriptService
+-- Dual Gravity Coil
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+-- Configuration
+local GRAVITY_REDUCTION = 0.75
+
+-- Dual Gravity Coil assets
+local MESH_ID = "rbxassetid://16606212"
+local GRAVITY_MESH_TEXTURE = "rbxassetid://150063177"
+local GRAVITY_ICON = "rbxassetid://150063217"
+local GRAVITY_SOUND = "rbxassetid://16619553"
+
+-- Fixed upright rotation for the coil mesh
+local COIL_ROTATION = CFrame.Angles(math.rad(90), 0, 0)
+
+local gravityConnections = {}
+
+local function removeGravityEffect(player)
+	local data = gravityConnections[player]
+
+	if data then
+		if data.connection then
+			data.connection:Disconnect()
+		end
+
+		if data.heartbeat then
+			data.heartbeat:Disconnect()
+		end
+
+		gravityConnections[player] = nil
+	end
+
+	local character = player.Character
+
+	if character then
+		local root = character:FindFirstChild("HumanoidRootPart")
+
+		if root then
+			local force = root:FindFirstChild("DualGravityCoilEffect")
+
+			if force then
+				force:Destroy()
+			end
+		end
+
+		local leftCoil = character:FindFirstChild("DualGravityCoil_Left")
+		local rightCoil = character:FindFirstChild("DualGravityCoil_Right")
+
+		if leftCoil then
+			leftCoil:Destroy()
+		end
+
+		if rightCoil then
+			rightCoil:Destroy()
+		end
+	end
+end
+
+local function createLegCoil(character, leg, name)
+	if not leg then
+		return
+	end
+
+	local coil = Instance.new("Part")
+	coil.Name = name
+	coil.Size = Vector3.new(1.2, 1.2, 1.2)
+	coil.Transparency = 0
+	coil.Anchored = true
+	coil.CanCollide = false
+	coil.CanTouch = false
+	coil.CanQuery = false
+	coil.CastShadow = false
+	coil.Massless = true
+	coil.Parent = character
+
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.FileMesh
+	mesh.MeshId = MESH_ID
+	mesh.TextureId = GRAVITY_MESH_TEXTURE
+	mesh.Scale = Vector3.new(0.7, 0.7, 0.7)
+	mesh.Parent = coil
+
+	-- Position follows the leg.
+	-- Rotation stays fixed so animations cannot lay the coil down.
+	coil.CFrame = CFrame.new(leg.Position) * COIL_ROTATION
+
+	return coil
+end
+
+local function applyGravityEffect(player, tool)
+	removeGravityEffect(player)
+
+	local character = player.Character
+
+	if not character then
+		return
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+
+	if not humanoid or not root then
+		return
+	end
+
+	-- Detect R15 or R6 legs
+	local leftLeg =
+		character:FindFirstChild("LeftLowerLeg")
+		or character:FindFirstChild("Left Leg")
+
+	local rightLeg =
+		character:FindFirstChild("RightLowerLeg")
+		or character:FindFirstChild("Right Leg")
+
+	-- Create the two visible coils
+	local leftCoil = createLegCoil(
+		character,
+		leftLeg,
+		"DualGravityCoil_Left"
+	)
+
+	local rightCoil = createLegCoil(
+		character,
+		rightLeg,
+		"DualGravityCoil_Right"
+	)
+
+	-- Sound (procura no Handle ou na Tool diretamente)
+	local sound = tool:FindFirstChild("CoilSound", true)
+
+	if sound then
+		sound:Play()
+	end
+
+	-- Gravity effect
+	local force = Instance.new("BodyForce")
+	force.Name = "DualGravityCoilEffect"
+	force.Parent = root
+
+	local oldJumpPower = humanoid.JumpPower
+	local oldJumpHeight = humanoid.JumpHeight
+	local useJumpPower = humanoid.UseJumpPower
+
+	local mass = root.AssemblyMass
+
+	force.Force = Vector3.new(
+		0,
+		mass * workspace.Gravity * GRAVITY_REDUCTION,
+		0
+	)
+
+	-- Jump behavior
+	if useJumpPower then
+		humanoid.JumpPower = 72
+	else
+		humanoid.JumpHeight = 18
+	end
+
+	local connection
+	local heartbeat
+
+	connection = tool.Unequipped:Connect(function()
+		if connection then
+			connection:Disconnect()
+		end
+
+		if heartbeat then
+			heartbeat:Disconnect()
+		end
+
+		if force then
+			force:Destroy()
+		end
+
+		local currentCharacter = player.Character
+
+		if currentCharacter then
+			local currentLeftCoil =
+				currentCharacter:FindFirstChild("DualGravityCoil_Left")
+
+			local currentRightCoil =
+				currentCharacter:FindFirstChild("DualGravityCoil_Right")
+
+			if currentLeftCoil then
+				currentLeftCoil:Destroy()
+			end
+
+			if currentRightCoil then
+				currentRightCoil:Destroy()
+			end
+		end
+
+		if humanoid and humanoid.Parent then
+			if useJumpPower then
+				humanoid.JumpPower = oldJumpPower
+			else
+				humanoid.JumpHeight = oldJumpHeight
+			end
+		end
+
+		gravityConnections[player] = nil
+	end)
+
+	heartbeat = RunService.Heartbeat:Connect(function()
+		if not tool.Parent
+			or tool.Parent ~= character
+			or not character.Parent
+			or not humanoid.Parent
+			or not root.Parent then
+
+			removeGravityEffect(player)
+			return
+		end
+
+		-- Follow only the leg POSITION.
+		-- The coil does not inherit the leg's animation rotation.
+		if leftCoil and leftLeg and leftLeg.Parent then
+			leftCoil.CFrame =
+				CFrame.new(leftLeg.Position) * COIL_ROTATION
+		end
+
+		if rightCoil and rightLeg and rightLeg.Parent then
+			rightCoil.CFrame =
+				CFrame.new(rightLeg.Position) * COIL_ROTATION
+		end
+
+		local currentMass = root.AssemblyMass
+
+		force.Force = Vector3.new(
+			0,
+			currentMass * workspace.Gravity * GRAVITY_REDUCTION,
+			0
+		)
+	end)
+
+	gravityConnections[player] = {
+		connection = connection,
+		heartbeat = heartbeat
+	}
+
+	humanoid.Died:Connect(function()
+		removeGravityEffect(player)
+	end)
+end
+
+local function createDualGravityCoil(player)
+	local tool = Instance.new("Tool")
+
+	tool.Name = "Dual Gravity Coil"
+	tool.ToolTip = "Dual Gravity Coil"
+	tool.CanBeDropped = false
+	tool.RequiresHandle = true
+
+	-- Handle invisível para ativar a animação do braço segurando o item
+	local handle = Instance.new("Part")
+	handle.Name = "Handle"
+	handle.Size = Vector3.new(0.2, 0.2, 0.2)
+	handle.Transparency = 1
+	handle.CanCollide = false
+	handle.Massless = true
+	handle.Parent = tool
+
+	-- Ícone do inventário
+	tool.TextureId = GRAVITY_ICON
+
+	-- Som anexado ao Handle
+	local sound = Instance.new("Sound")
+	sound.Name = "CoilSound"
+	sound.SoundId = GRAVITY_SOUND
+	sound.Volume = 1
+	sound.Parent = handle
+
+	tool.Equipped:Connect(function()
+		applyGravityEffect(player, tool)
+	end)
+
+	tool.Unequipped:Connect(function()
+		removeGravityEffect(player)
+	end)
+
+	return tool
+end
+
+local function giveDualGravityCoil(player)
+	local function onCharacterAdded(character)
+		task.wait(0.6)
+
+		local backpack = player:WaitForChild("Backpack")
+
+		if not backpack:FindFirstChild("Dual Gravity Coil")
+			and not character:FindFirstChild("Dual Gravity Coil") then
+
+			createDualGravityCoil(player).Parent = backpack
+		end
+	end
+
+	if player.Character then
+		onCharacterAdded(player.Character)
+	end
+
+	player.CharacterAdded:Connect(onCharacterAdded)
+end
+
+Players.PlayerAdded:Connect(giveDualGravityCoil)
+
+for _, player in ipairs(Players:GetPlayers()) do
+	giveDualGravityCoil(player)
+end
+
+print("Dual Gravity Coil loaded successfully!")
